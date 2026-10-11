@@ -39,7 +39,7 @@ async function callGroq(env, p) {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${env.GROQ_API_KEY}` },
     body: JSON.stringify({
-      model: env.GROQ_MODEL || "llama-3.1-8b-instant",
+      model: env.GROQ_MODEL || "openai/gpt-oss-20b",
       messages: [
         { role: "system", content: p.system },
         { role: "user", content: p.user },
