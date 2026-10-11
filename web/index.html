@@ -41,6 +41,7 @@
   .plan ul { padding-left:18px; margin:8px 0; font-size:13px; flex:1; }
   .plan button.primary { margin-top:auto; }
 </style>
+<link rel="stylesheet" href="/assets/help.css">
 </head>
 <body>
 <main>
@@ -185,6 +186,7 @@ $("#p-free").onclick = async () => {
 {
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing) {
+    window.jevletBillingReturn = billing; // read by assets/help.js (skip the first-visit tour)
     const msg = billing === "success"
       ? "Payment received. Your key's plan upgrade takes effect within a minute; check the Usage tab."
       : "Checkout cancelled. Nothing was charged.";
@@ -390,5 +392,6 @@ $("#u-refresh").addEventListener("click", loadUsage);
 
 loadAdapters();
 </script>
+<script type="module" src="/assets/help.js"></script>
 </body>
 </html>
