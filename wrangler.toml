@@ -26,3 +26,12 @@ migrations_dir = "migrations"
 
 # Secrets (never commit): wrangler secret put GEMINI_API_KEY / GROQ_API_KEY / JEV_API_KEY
 # Optional vars: GEMINI_MODEL, GROQ_MODEL, WORKERS_AI_MODEL, JEV_URL
+
+# Billing (Stripe, test mode). Secrets: wrangler secret put STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET
+# Vars (not secret): STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, optional APP_URL, SELF_SERVE_KEYS.
+# Live keys (sk_live_) are refused unless STRIPE_LIVE_MODE = "true".
+# [vars]
+# STRIPE_PRICE_PRO = "price_..."
+# STRIPE_PRICE_TEAM = "price_..."
+# SELF_SERVE_KEYS = "true"
+

@@ -34,6 +34,12 @@
   td, th { border-bottom:1px solid var(--line); padding:6px; text-align:left; vertical-align:top; }
   pre { white-space: pre-wrap; word-break: break-word; font-size:12px; margin:0; }
   .hidden { display:none !important; }
+  .plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+  .plan { border:1px solid var(--line); border-radius:12px; padding:12px; display:flex; flex-direction:column; }
+  .plan h3 { margin:0; font-size:15px; }
+  .plan .price { font-size:24px; font-weight:700; margin:6px 0 2px; }
+  .plan ul { padding-left:18px; margin:8px 0; font-size:13px; flex:1; }
+  .plan button.primary { margin-top:auto; }
 </style>
 </head>
 <body>
@@ -50,6 +56,7 @@
     <button role="tab" data-tab="batch" aria-selected="false">Batch</button>
     <button role="tab" data-tab="calibrate" aria-selected="false">Calibrate</button>
     <button role="tab" data-tab="usage" aria-selected="false">Usage</button>
+    <button role="tab" data-tab="plans" aria-selected="false">Plans</button>
   </nav>
 
   <!-- DECIDE -->
@@ -96,6 +103,37 @@
     <button class="primary" id="u-refresh" type="button" style="margin-top:0">Refresh</button>
     <div id="u-out"></div>
   </section>
+
+  <!-- PLANS -->
+  <section data-tab="plans" class="card hidden">
+    <h2>Plans</h2>
+    <p class="muted">One unit is one model call. Cache hits are free. Billed monthly through Stripe; cancel any time and the key drops back to Free.</p>
+    <div class="plans">
+      <div class="plan">
+        <h3>Free</h3>
+        <div class="price">$0</div>
+        <div class="muted">forever</div>
+        <ul><li>100 units / day</li><li>All adapters</li><li>Per-key calibration</li></ul>
+        <button class="primary" type="button" id="p-free">Get a free key</button>
+      </div>
+      <div class="plan">
+        <h3>Pro</h3>
+        <div class="price">$19</div>
+        <div class="muted">per month</div>
+        <ul><li>5,000 units / day</li><li>All adapters</li><li>Per-key calibration</li></ul>
+        <button class="primary" type="button" data-plan="pro">Upgrade to Pro</button>
+      </div>
+      <div class="plan">
+        <h3>Team</h3>
+        <div class="price">$99</div>
+        <div class="muted">per month</div>
+        <ul><li>50,000 units / day</li><li>All adapters</li><li>Per-key calibration</li></ul>
+        <button class="primary" type="button" data-plan="team">Upgrade to Team</button>
+      </div>
+    </div>
+    <p class="muted">Upgrades apply to the API key entered above.</p>
+    <div id="p-out"></div>
+  </section>
 </main>
 
 <script>
@@ -117,6 +155,45 @@ async function api(path, opts = {}) {
   });
   const body = await r.json().catch(() => ({ error: { code: "BAD_RESPONSE", detail: r.statusText } }));
   return { status: r.status, body };
+}
+
+// ---- plans / billing ----
+document.querySelectorAll("button[data-plan]").forEach((b) => {
+  b.onclick = async () => {
+    if (!tokenEl.value.trim()) { $("#p-out").innerHTML = `<p class="err">Enter your API key above first (or get a free one).</p>`; return; }
+    b.disabled = true;
+    const { status, body } = await api("/v1/billing/checkout", { method: "POST", body: JSON.stringify({ plan: b.dataset.plan }) });
+    b.disabled = false;
+    if (status === 200 && body.url) { location.href = body.url; return; }
+    $("#p-out").innerHTML = `<p class="err">${esc(body.error?.code)}: ${esc(body.error?.detail)}</p>`;
+  };
+});
+$("#p-free").onclick = async () => {
+  const r = await fetch("/v1/keys", { method: "POST" });
+  const body = await r.json().catch(() => ({}));
+  if (r.status === 201 && body.token) {
+    tokenEl.value = body.token;
+    storeSet("jevlet_token", body.token);
+    $("#p-out").innerHTML = `<p>Your key (shown once, saved on this device):</p><pre>${esc(body.token)}</pre><p class="muted">${esc(body.daily_cap)} units / day.</p>`;
+    loadAdapters();
+  } else if (r.status === 404) {
+    $("#p-out").innerHTML = `<p class="muted">Self-serve keys are not enabled on this instance. Ask the operator for a key.</p>`;
+  } else {
+    $("#p-out").innerHTML = `<p class="err">${esc(body.error?.code)}: ${esc(body.error?.detail)}</p>`;
+  }
+};
+{
+  const billing = new URLSearchParams(location.search).get("billing");
+  if (billing) {
+    const msg = billing === "success"
+      ? "Payment received. Your key's plan updates within a few seconds; check the Usage tab."
+      : "Checkout cancelled. Nothing was charged.";
+    setTimeout(() => {
+      document.querySelector('nav button[data-tab="plans"]').click();
+      $("#p-out").innerHTML = `<p>${esc(msg)}</p>`;
+    }, 0);
+    history.replaceState(null, "", location.pathname);
+  }
 }
 
 // ---- tabs ----

@@ -26,7 +26,6 @@ The model behind it is swappable. The contract (typed in, typed out, calibrated,
 - Tau selection on a dev set (target accuracy 90%). Tau is currently set per adapter.
 - Runaway guard (5x trailing-average throttle). Not implemented.
 - GitHub Actions CI gate, position-bias test, and trap set. The eval runner exists; the CI workflow does not.
-- Stripe tiers and the webhook that writes the tier into KV. Keys are minted by hand.
 - Raw payload audit to R2.
 
 ## Setup
@@ -47,7 +46,7 @@ npm run deploy
 Create a key (the token prints once; KV stores only its hash):
 
 ```bash
-node tools/mkkey.mjs 500      # 500 units per day
+node tools/mkkey.mjs 100      # 100 units per day (Free); e.g. `node tools/mkkey.mjs 5000 pro`
 # run the printed `wrangler kv key put` command
 ```
 
@@ -79,6 +78,36 @@ curl -s https://<host>/v1/decide -H "authorization: Bearer $JEVLET_TOKEN" \
              "choices":["lab","desktop computer","laptop","server","bookshelf"]},
     "options":{"votes":5}}'
 ```
+
+## Billing (Stripe)
+
+Tiers (placeholders to confirm before launch; defined in `worker/billing.js` `TIERS`):
+
+| Tier | Price | Daily cap |
+|------|-------|-----------|
+| Free | $0 | 100 units |
+| Pro | $19 / month | 5,000 units |
+| Team | $99 / month | 50,000 units |
+
+Endpoints:
+
+- `POST /v1/billing/checkout` `{"plan":"pro"|"team"}` with the caller's Bearer key. Returns a Stripe Checkout `url` (subscription mode). The session carries `client_reference_id` and `metadata.key_id` = the key's SHA-256 id, never the raw token.
+- `POST /v1/billing/webhook`, called by Stripe. Verifies `Stripe-Signature` (HMAC-SHA256, 300 s tolerance), then writes `{tier, daily_cap}` to `key:<key_id>` on `checkout.session.completed` and `customer.subscription.created/updated`, and drops to Free on `customer.subscription.deleted` (or status `canceled`/`unpaid`/`incomplete_expired`/`paused`). Each event id is processed once (KV `stripe_evt:<id>`, 30-day TTL), and older events never overwrite newer ones.
+- `POST /v1/keys`: self-serve Free key, **off unless `SELF_SERVE_KEYS = "true"`**. Limited to 3 per client IP per day (best effort).
+
+Setup (Stripe **test mode**):
+
+1. Dashboard → Product catalog: create product "Jevlet Pro" with a recurring monthly price of $19, and "Jevlet Team" at $99. Copy both `price_...` ids.
+2. Developers → Webhooks → Add endpoint: `https://<your-worker-host>/v1/billing/webhook`, events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`. Copy the signing secret (`whsec_...`).
+3. Configure the Worker:
+
+```bash
+npx wrangler secret put STRIPE_SECRET_KEY        # sk_test_...
+npx wrangler secret put STRIPE_WEBHOOK_SECRET    # whsec_...
+# in wrangler.toml [vars]: STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, optional APP_URL (checkout return URL base), SELF_SERVE_KEYS
+```
+
+Live keys (`sk_live_...`) are refused unless `STRIPE_LIVE_MODE = "true"`. Local testing: `stripe listen --forward-to localhost:8787/v1/billing/webhook` and `stripe trigger checkout.session.completed` (the trigger fixture has no `key_id`, so it is acknowledged and ignored; a real Checkout from the Plans tab exercises the full path).
 
 ## Design decisions to know about
 
