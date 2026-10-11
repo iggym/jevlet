@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Typed System-One decision API: typed in, typed out, calibrated, abstaining, metered.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test test/core.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "migrate": "wrangler d1 migrations apply jevlet --remote",
-    "eval": "node eval/run.mjs eval/sets/sample.jsonl"
+    "eval": "node eval/run.mjs eval/sets/sample.jsonl",
+    "check": "wrangler deploy --dry-run --outdir dist"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
