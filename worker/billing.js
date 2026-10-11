@@ -107,8 +107,17 @@ export async function applyEvent(env, event) {
   const seenKey = "stripe_evt:" + event.id;
   if (await env.KV.get(seenKey)) return { status: "duplicate" };
 
-  const tier = tierForEvent(env, event);
+  let tier = tierForEvent(env, event);
   const keyId = keyIdForEvent(event);
+  // Payment Links: the session carries client_reference_id (the key_id) but not our
+  // metadata.plan, and the subscription carries the price but not the key. Resolve the plan
+  // from the subscription's price and tag the subscription with key_id so later
+  // customer.subscription.updated/deleted events find the key.
+  const obj = event?.data?.object ?? {};
+  if (keyId && event.type === "checkout.session.completed" && (!tier || obj.payment_link)) {
+    const plan = await resolvePaymentLinkPlan(env, event, keyId);
+    tier = tier || plan;
+  }
   let result;
   if (!tier) result = { status: "ignored", reason: "no tier change" };
   else if (!keyId) result = { status: "ignored", reason: "no key reference" };
@@ -133,6 +142,29 @@ export async function applyEvent(env, event) {
   }
   await env.KV.put(seenKey, "1", { expirationTtl: EVENT_TTL_S });
   return result;
+}
+
+// For a paid subscription checkout.session.completed without metadata.plan (Payment Links).
+export async function resolvePaymentLinkPlan(env, event, keyId) {
+  const o = event?.data?.object ?? {};
+  if (event?.type !== "checkout.session.completed" || o.mode !== "subscription" || !o.subscription) return null;
+  if (o.payment_status && o.payment_status !== "paid" && o.payment_status !== "no_payment_required") return null;
+  if (!env.STRIPE_SECRET_KEY || !stripeKeyAllowed(env)) return null;
+  const auth = { authorization: `Bearer ${env.STRIPE_SECRET_KEY}` };
+  const r = await fetch(`${STRIPE_API}/subscriptions/${encodeURIComponent(o.subscription)}`, { headers: auth });
+  if (!r.ok) return null;
+  const sub = await r.json();
+  const plan = priceToPlan(env, sub.items?.data?.[0]?.price?.id);
+  if (!plan) return null;
+  if (sub.metadata?.key_id !== keyId) {
+    const f = new URLSearchParams({ "metadata[key_id]": keyId, "metadata[plan]": plan });
+    await fetch(`${STRIPE_API}/subscriptions/${encodeURIComponent(o.subscription)}`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      body: f.toString(),
+    }).catch(() => null);
+  }
+  return plan;
 }
 
 // ---------- Checkout ----------

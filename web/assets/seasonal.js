@@ -38,23 +38,23 @@ export const CATEGORIES = [
 
 // Real Jevlet tools only. `tab` = UI tab to open, `topic` = help modal (assets/help.js).
 export const CARDS = [
-  { id: "csqa", cat: "productivity", icon: "choice", title: "Multiple choice · csqa", tag: "Adapter · choice", tab: "decide", adapter: "csqa", topic: "adapters",
+  { id: "csqa", example: "decide-csqa", cat: "productivity", icon: "choice", title: "Multiple choice · csqa", tag: "Adapter · choice", tab: "decide", adapter: "csqa", topic: "adapters",
     desc: "Pick the single most sensible answer from your own list of 2–10 options. Returns the label with a probability for every option, or an explicit abstain." },
-  { id: "policy_check", cat: "productivity", icon: "scale", title: "Policy check", tag: "Adapter · boolean", tab: "decide", adapter: "policy_check", topic: "adapters",
+  { id: "policy_check", example: "decide-policy", cat: "productivity", icon: "scale", title: "Policy check", tag: "Adapter · boolean", tab: "decide", adapter: "policy_check", topic: "adapters",
     desc: "Does a case comply with a policy? A true/false decision judged only from the text you provide, with its confidence." },
-  { id: "batch", cat: "productivity", icon: "layers", title: "Batch runner", tag: "In this app", tab: "batch", topic: "batch",
+  { id: "batch", example: "batch", cat: "productivity", icon: "layers", title: "Batch runner", tag: "In this app", tab: "batch", topic: "batch",
     desc: "Paste one JSON request per line, run them 4 at a time, and export every row to CSV." },
-  { id: "calibrate", cat: "productivity", icon: "target", title: "Calibrate", tag: "In this app", tab: "calibrate", topic: "calibration",
+  { id: "calibrate", example: "calibrate", cat: "productivity", icon: "target", title: "Calibrate", tag: "In this app", tab: "calibrate", topic: "calibration",
     desc: "Label past decisions with the truth. After 200 labels for an adapter, your key gets a fitted temperature, with ECE shown before and after." },
-  { id: "usage", cat: "utilities", icon: "gauge", title: "Usage dashboard", tag: "In this app", tab: "usage", topic: "usage",
+  { id: "usage", example: "usage", cat: "utilities", icon: "gauge", title: "Usage dashboard", tag: "In this app", tab: "usage", topic: "usage",
     desc: "Units and requests used today against your daily cap, plus calibration status per adapter." },
-  { id: "plans", cat: "utilities", icon: "card", title: "Plans & billing", tag: "In this app", tab: "plans", topic: "plans",
+  { id: "plans", example: "checkout", cat: "utilities", icon: "card", title: "Plans & billing", tag: "In this app", tab: "plans", topic: "plans",
     desc: "Free $0 · 100 units/day, Pro $19/mo · 5,000/day, Team $99/mo · 50,000/day. Upgrade through Stripe Checkout." },
-  { id: "quickstart", cat: "utilities", icon: "code", title: "API quickstart", tag: "Docs", topic: "quickstart",
+  { id: "quickstart", example: "adapters", cat: "utilities", icon: "code", title: "API quickstart", tag: "Docs", topic: "quickstart",
     desc: "Copy-paste curl examples for decide, adapters, usage, calibrate, and checkout, using this site's base URL." },
   { id: "eval", cat: "utilities", icon: "chart", title: "Eval runner", tag: "CLI · npm run eval", topic: "eval",
     desc: "Scores a JSONL set against a deployed instance: accuracy on kept decisions, abstention rate, units per decision, p50/p95 latency." },
-  { id: "mkkey", cat: "utilities", icon: "key", title: "Key minting", tag: "CLI · tools/mkkey.mjs", topic: "keys",
+  { id: "mkkey", example: "keys-create", cat: "utilities", icon: "key", title: "Key minting", tag: "CLI · tools/mkkey.mjs", topic: "keys",
     desc: "Mints a jvl_ API key with a daily cap and tier. The token prints once; only its SHA-256 hash is stored." },
 ];
 
@@ -111,6 +111,7 @@ function init() {
       <p class="s-hero-sub">Structured input in; a typed choice or true/false out, with a calibrated probability or an explicit abstain.</p>
       <div class="s-hero-icons">${set.icons.map((n) => `<span class="s-icon" title="${esc(n)}">${SEASON_ICONS[n]}</span>`).join("")}</div>
       <div class="s-hero-cta">
+        <a class="s-chip s-chip-key" href="#get-key">Get a free API key</a>
         <a class="s-chip" href="#showcase">Browse tools</a>
         <button type="button" class="s-chip" data-help="decision">How it works</button>
         <button type="button" class="s-chip s-fx" aria-pressed="true">Seasonal effects: on</button>
@@ -143,6 +144,7 @@ function init() {
             <p>${esc(c.desc)}</p>
             <div class="s-card-actions">
               <button type="button" class="s-act" data-help="${c.topic}" aria-label="Learn more about ${esc(c.title)}">Learn more</button>
+              ${c.example ? `<button type="button" class="s-act" data-example="${c.example}" aria-label="Worked example for ${esc(c.title)}">Example</button>` : ""}
               ${c.tab ? `<button type="button" class="s-act s-act-go" data-open-tab="${c.tab}" ${c.adapter ? `data-adapter="${c.adapter}"` : ""} aria-label="Open ${esc(c.title)}">Open</button>` : ""}
             </div>
           </div>

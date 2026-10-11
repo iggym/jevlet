@@ -30,7 +30,6 @@ migrations_dir = "migrations"
 # Billing (Stripe, test mode). Secrets: wrangler secret put STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET
 # Vars (not secret): STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, optional APP_URL, SELF_SERVE_KEYS.
 # Live keys (sk_live_) are refused unless STRIPE_LIVE_MODE = "true".
-# Optional, off by default: SELF_SERVE_KEYS = "true" (under [vars]) enables POST /v1/keys.
 
 [vars]
 # gemini-2.0-flash / 2.5-flash(-lite) were retired by Google (HTTP 404) as of 2026-10-11.
@@ -41,4 +40,9 @@ GROQ_MODEL = "openai/gpt-oss-20b"
 STRIPE_PRICE_PRO = "price_1UPVNoAZjx3F9T7d2cRFjE3K"
 STRIPE_PRICE_TEAM = "price_1UPVNoAZjx3F9T7dCae58PT1"
 APP_URL = "https://jevlet.iggy-mw.workers.dev"
+# Stripe Payment Links (TEST mode). The UI appends ?client_reference_id=<key_id> so the webhook upgrades the right key.
+STRIPE_LINK_PRO = "https://buy.stripe.com/test_cNi9AS85Rcbi71x9P64sE01"
+STRIPE_LINK_TEAM = "https://buy.stripe.com/test_14A28q2Lxfnufy37GY4sE02"
+# Self-serve free keys (POST /v1/keys), limited atomically to 3 per client IP per day.
+SELF_SERVE_KEYS = "true"
 
