@@ -19,6 +19,15 @@ import {
 } from "./core.js";
 import { judgeOnce } from "./providers.js";
 import {
+  getCalibration,
+  putCalibration,
+  reserve,
+  settleUnitsStmt,
+  normalizeLabels,
+  storeLabels,
+  DEFAULT_DAILY_LABEL_CAP,
+} from "./store.js";
+import {
   TIERS,
   PAID_PLANS,
   verifyStripeSignature,
@@ -93,9 +102,16 @@ async function handleDecide(req, env, ctx) {
   const hash = await sha256Hex(stableStringify([adapter.id, body.state, votes, opts.tau ?? null]));
   const useCache = opts.cache !== false;
 
+  // Calibration belongs to the calling key only. No fit for this key -> uncalibrated.
+  const cal = await getCalibration(env, adapter.id, key.key_id);
+  const calT = cal && cal.n >= CAL_MIN_N && cal.temperature ? cal.temperature : null;
+  // The cached response embeds the calibrated distribution, so the cache key includes the
+  // calibration actually applied. Uncalibrated keys still share cache entries.
+  const cacheKey = "cache:" + (await sha256Hex(stableStringify([hash, calT, cal?.tau ?? null])));
+
   // Cache hits are free and call no provider, so they are served before the budget check.
   if (useCache) {
-    const hit = await env.KV.get("cache:" + hash, "json");
+    const hit = await env.KV.get(cacheKey, "json");
     if (hit)
       return json({
         ...hit,
@@ -104,24 +120,32 @@ async function handleDecide(req, env, ctx) {
       });
   }
 
-  // Budget: reserve worst case (one call per vote) before any provider is called.
-  const u = await env.DB.prepare("SELECT units FROM usage_daily WHERE key_id = ? AND day = ?")
-    .bind(key.key_id, today())
-    .first();
-  const used = u?.units ?? 0;
-  if (used + votes > key.daily_cap)
-    return json(err("BUDGET_EXCEEDED", "", `daily cap ${key.daily_cap} units, used ${used}`), 429);
+  // Budget: atomically reserve the worst case (one call per vote) before any provider is
+  // called. The check and the increment are one D1 statement, so concurrent requests
+  // cannot overspend the cap. The reservation is settled to actual cost afterwards.
+  const day = today();
+  const r = await reserve(env.DB, key.key_id, day, votes, key.daily_cap, "units");
+  if (!r.ok) return json(err("BUDGET_EXCEEDED", "", `daily cap ${key.daily_cap} units, used ${r.used}`), 429);
 
   const t0 = Date.now();
-  const results = await Promise.all(
-    Array.from({ length: votes }, (_, i) => runVote(env, adapter, body.state, hash, i))
-  );
+  let results;
+  try {
+    results = await Promise.all(
+      Array.from({ length: votes }, (_, i) => runVote(env, adapter, body.state, hash, i))
+    );
+  } catch (e) {
+    await settleUnitsStmt(env.DB, key.key_id, day, -votes, false).run(); // release reservation
+    throw e;
+  }
   const ok = results.filter((r) => r.ok);
   const attempts = results.reduce((a, r) => a + r.attempts, 0);
   const fallbacks = results.flatMap((r) => r.fallbacks);
-  if (!ok.length) return json(err("PROVIDERS_EXHAUSTED", "", `all ${votes} votes failed`), 503);
+  if (!ok.length) {
+    // Unchanged policy: an all-failed request is not billed. Release the reservation.
+    await settleUnitsStmt(env.DB, key.key_id, day, -votes, false).run();
+    return json(err("PROVIDERS_EXHAUSTED", "", `all ${votes} votes failed`), 503);
+  }
 
-  const cal = await env.KV.get("cal:" + adapter.id, "json");
   const labels = adapter.head === "choice" ? body.state[adapter.labels_from] : null;
   const d = decide(adapter, ok, cal, opts.tau ?? null, labels);
   const providers = [...new Set(ok.map((r) => r.provider))];
@@ -148,12 +172,13 @@ async function handleDecide(req, env, ctx) {
     },
   };
 
-  ctx.waitUntil(record(env, key, adapter, out, hash, labels));
-  if (useCache) ctx.waitUntil(env.KV.put("cache:" + hash, JSON.stringify(out), { expirationTtl: 86400 }));
+  ctx.waitUntil(record(env, key, adapter, out, hash, labels, day, votes));
+  if (useCache) ctx.waitUntil(env.KV.put(cacheKey, JSON.stringify(out), { expirationTtl: 86400 }));
   return json(out);
 }
 
-async function record(env, key, adapter, out, hash, labels) {
+// Writes the decision and settles the unit reservation (reserved -> actual cost_units).
+async function record(env, key, adapter, out, hash, labels, day, reserved) {
   const d = out.decision;
   await env.DB.batch([
     env.DB.prepare(
@@ -178,10 +203,7 @@ async function record(env, key, adapter, out, hash, labels) {
       labels ? JSON.stringify(labels) : null,
       d.distribution ? JSON.stringify(d.distribution) : null
     ),
-    env.DB.prepare(
-      `INSERT INTO usage_daily (key_id, day, units, calls) VALUES (?,?,?,1)
-       ON CONFLICT(key_id, day) DO UPDATE SET units = units + excluded.units, calls = calls + 1`
-    ).bind(key.key_id, today(), out.diagnostics.cost_units),
+    settleUnitsStmt(env.DB, key.key_id, day, out.diagnostics.cost_units - reserved, true),
   ]);
 }
 
@@ -207,22 +229,27 @@ async function handleAdapters(req, env) {
 async function handleUsage(req, env) {
   const key = await auth(req, env);
   if (!key) return json(err("UNAUTHORIZED", "authorization"), 401);
-  const u = await env.DB.prepare("SELECT units, calls FROM usage_daily WHERE key_id = ? AND day = ?")
+  const u = await env.DB.prepare("SELECT units, calls, labels FROM usage_daily WHERE key_id = ? AND day = ?")
     .bind(key.key_id, today())
     .first();
   const calibration = {};
-  for (const a of Object.values(ADAPTERS)) calibration[a.id] = (await env.KV.get("cal:" + a.id, "json")) ?? null;
+  for (const a of Object.values(ADAPTERS)) calibration[a.id] = await getCalibration(env, a.id, key.key_id);
   return json({
     day: today(),
     units_today: u?.units ?? 0,
     calls_today: u?.calls ?? 0,
     daily_cap: key.daily_cap,
+    labels_today: u?.labels ?? 0,
+    daily_label_cap: key.daily_label_cap ?? DEFAULT_DAILY_LABEL_CAP,
     calibration,
   });
 }
 
 // ---------- POST /v1/calibrate  { adapter, labels: [{decision_id, truth}] } ----------
 // Stores labels, then refits temperature and reports ECE over this key's labeled decisions.
+// Limits: MAX_LABELS_PER_CALL per request, duplicates collapsed (last wins), labels only
+// accepted for this key's own decisions, and a per-key daily label cap (each call counts
+// at least 1, so refit-only calls are capped too).
 
 async function handleCalibrate(req, env) {
   const key = await auth(req, env);
@@ -230,23 +257,15 @@ async function handleCalibrate(req, env) {
   const body = await req.json().catch(() => null);
   const adapter = ADAPTERS[body?.adapter];
   if (!adapter) return json(err("UNKNOWN_ADAPTER", "adapter"), 400);
-  const labels = Array.isArray(body.labels) ? body.labels : [];
-  if (labels.length > 1000) return json(err("INVALID_SCHEMA", "labels", "max 1000 per call"), 400);
-  for (const [i, l] of labels.entries())
-    if (!l || typeof l.decision_id !== "string" || l.truth == null)
-      return json(err("INVALID_SCHEMA", `labels[${i}]`, "needs decision_id and truth"), 400);
+  const norm = normalizeLabels(body.labels);
+  if (!norm.ok) return json(err("INVALID_SCHEMA", norm.path, norm.detail), 400);
+  const labels = norm.labels;
 
-  if (labels.length) {
-    await env.DB.batch(
-      labels.map((l) =>
-        env.DB.prepare("INSERT INTO labels (decision_id, truth, ts) VALUES (?,?,?)").bind(
-          l.decision_id,
-          String(l.truth),
-          Date.now()
-        )
-      )
-    );
-  }
+  const labelCap = key.daily_label_cap ?? DEFAULT_DAILY_LABEL_CAP;
+  const r = await reserve(env.DB, key.key_id, today(), Math.max(1, labels.length), labelCap, "labels");
+  if (!r.ok) return json(err("BUDGET_EXCEEDED", "labels", `daily label cap ${labelCap}, used ${r.used}`), 429);
+
+  const stored = await storeLabels(env.DB, key.key_id, labels);
 
   const rows = await env.DB.prepare(
     `SELECT d.labels, d.distribution, l.truth
@@ -269,7 +288,7 @@ async function handleCalibrate(req, env) {
   const T = n >= 2 ? fitTemperature(samples) : 1;
   const eceRaw = ece(samples);
   const eceCal = ece(samples.map((s) => ({ p: applyTemperature(s.p, T), t: s.t })));
-  const existing = await env.KV.get("cal:" + adapter.id, "json");
+  const existing = await getCalibration(env, adapter.id, key.key_id);
   const cal = {
     tau: existing?.tau ?? adapter.tau,
     temperature: T,
@@ -277,8 +296,16 @@ async function handleCalibrate(req, env) {
     ece: eceCal,
     fitted_at: new Date().toISOString(),
   };
-  await env.KV.put("cal:" + adapter.id, JSON.stringify(cal));
-  return json({ adapter: adapter.id, ...cal, ece_raw: eceRaw, calibrated: n >= CAL_MIN_N });
+  await putCalibration(env, adapter.id, key.key_id, cal);
+  return json({
+    adapter: adapter.id,
+    ...cal,
+    ece_raw: eceRaw,
+    calibrated: n >= CAL_MIN_N,
+    labels_received: labels.length,
+    labels_stored: stored,
+    labels_skipped: labels.length - stored,
+  });
 }
 
 // ---------- POST /v1/billing/checkout  { plan: "pro" | "team" } ----------
