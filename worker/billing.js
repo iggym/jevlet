@@ -5,7 +5,8 @@
 // Keys are only ever referenced by key_id = sha256(token), the same id KV already uses
 // ("key:<key_id>"). The raw token never goes to Stripe.
 
-// ASSUMPTION: tier names, prices and caps are placeholders to confirm before launch.
+// Confirmed by Iggy 2026-10-11: Free $0 / 100 per day, Pro $19/mo / 5,000, Team $99/mo / 50,000.
+// Prices live in Stripe (STRIPE_PRICE_PRO / STRIPE_PRICE_TEAM); keep these caps and web/index.html in sync.
 export const TIERS = {
   free: { daily_cap: 100 },
   pro: { daily_cap: 5000 },
