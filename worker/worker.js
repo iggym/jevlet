@@ -1,7 +1,7 @@
 // Jevlet: typed decision API. One Worker, static UI served from web/ via Workers Assets.
 
-import csqa from "../adapters/csqa.json";
-import policyCheck from "../adapters/policy_check.json";
+import csqa from "../adapters/csqa.json" with { type: "json" };
+import policyCheck from "../adapters/policy_check.json" with { type: "json" };
 import {
   CAL_MIN_N,
   err,
@@ -18,6 +18,16 @@ import {
   truthIndex,
 } from "./core.js";
 import { judgeOnce } from "./providers.js";
+import {
+  TIERS,
+  PAID_PLANS,
+  verifyStripeSignature,
+  applyEvent,
+  createCheckoutSession,
+  stripeKeyAllowed,
+  mintToken,
+  SELF_SERVE_PER_IP_PER_DAY,
+} from "./billing.js";
 
 const ADAPTERS = Object.fromEntries([csqa, policyCheck].map((a) => [a.id, a]));
 const MAX_VOTES = 9;
@@ -271,6 +281,55 @@ async function handleCalibrate(req, env) {
   return json({ adapter: adapter.id, ...cal, ece_raw: eceRaw, calibrated: n >= CAL_MIN_N });
 }
 
+// ---------- POST /v1/billing/checkout  { plan: "pro" | "team" } ----------
+// Creates a Stripe Checkout Session (subscription) linked to the caller's key_id.
+
+async function handleCheckout(req, env) {
+  const key = await auth(req, env);
+  if (!key) return json(err("UNAUTHORIZED", "authorization"), 401);
+  if (!env.STRIPE_SECRET_KEY) return json(err("BILLING_NOT_CONFIGURED", "", "billing is not enabled"), 503);
+  if (!stripeKeyAllowed(env))
+    return json(err("BILLING_NOT_CONFIGURED", "", "live Stripe keys need STRIPE_LIVE_MODE=true"), 503);
+  const body = await req.json().catch(() => null);
+  const plan = body?.plan;
+  if (!PAID_PLANS.includes(plan)) return json(err("INVALID_SCHEMA", "plan", `one of ${PAID_PLANS.join(", ")}`), 400);
+  const r = await createCheckoutSession(env, { plan, keyId: key.key_id, origin: new URL(req.url).origin });
+  if (!r.ok) return json(err(r.code, "", r.detail), r.code === "BILLING_NOT_CONFIGURED" ? 503 : 502);
+  return json({ id: r.id, url: r.url });
+}
+
+// ---------- POST /v1/billing/webhook (Stripe -> us; signed, no bearer auth) ----------
+
+async function handleWebhook(req, env) {
+  const raw = await req.text();
+  const v = await verifyStripeSignature(raw, req.headers.get("stripe-signature"), env.STRIPE_WEBHOOK_SECRET);
+  if (!v.ok) return json(err("INVALID_SIGNATURE", "stripe-signature", v.reason), 400);
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return json(err("INVALID_SCHEMA", "$", "body is not JSON"), 400);
+  }
+  const r = await applyEvent(env, event);
+  return json({ received: true, ...r });
+}
+
+// ---------- POST /v1/keys (opt-in self-serve free key) ----------
+// Enabled only when SELF_SERVE_KEYS = "true". Best-effort limit per client IP per day.
+
+async function handleSelfServeKey(req, env) {
+  if (env.SELF_SERVE_KEYS !== "true") return json(err("NOT_FOUND", "/v1/keys"), 404);
+  const ip = req.headers.get("cf-connecting-ip") || "unknown";
+  const ipKey = `ipkeys:${await sha256Hex(ip)}:${today()}`;
+  const n = Number((await env.KV.get(ipKey)) ?? 0);
+  if (n >= SELF_SERVE_PER_IP_PER_DAY) return json(err("RATE_LIMITED", "", "too many keys today"), 429);
+  await env.KV.put(ipKey, String(n + 1), { expirationTtl: 172800 });
+  const token = await mintToken();
+  const rec = { tier: "free", daily_cap: TIERS.free.daily_cap, created: new Date().toISOString(), source: "self_serve" };
+  await env.KV.put("key:" + (await sha256Hex(token)), JSON.stringify(rec));
+  return json({ token, tier: rec.tier, daily_cap: rec.daily_cap, note: "Shown once. Only its hash is stored." }, 201);
+}
+
 // ---------- entry ----------
 
 async function route(req, env, ctx, url) {
@@ -280,6 +339,9 @@ async function route(req, env, ctx, url) {
   if (p === "/v1/adapters" && m === "GET") return handleAdapters(req, env);
   if (p === "/v1/usage" && m === "GET") return handleUsage(req, env);
   if (p === "/v1/calibrate" && m === "POST") return handleCalibrate(req, env);
+  if (p === "/v1/billing/checkout" && m === "POST") return handleCheckout(req, env);
+  if (p === "/v1/billing/webhook" && m === "POST") return handleWebhook(req, env);
+  if (p === "/v1/keys" && m === "POST") return handleSelfServeKey(req, env);
   return json(err("NOT_FOUND", p), 404);
 }
 

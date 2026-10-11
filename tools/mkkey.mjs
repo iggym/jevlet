@@ -1,10 +1,11 @@
 // Mints an API key. Prints the token once (give it to the caller) and the
 // wrangler command that stores only its SHA-256 hash in KV.
-// Usage: node tools/mkkey.mjs [daily_cap_units=500] [tier=free]
+// Usage: node tools/mkkey.mjs [daily_cap_units=100] [tier=free]
+// Default cap matches TIERS.free in worker/billing.js.
 
 import { randomBytes, createHash } from "node:crypto";
 
-const cap = Number(process.argv[2] ?? 500);
+const cap = Number(process.argv[2] ?? 100);
 const tier = process.argv[3] ?? "free";
 const token = "jvl_" + randomBytes(24).toString("base64url");
 const hash = createHash("sha256").update(token).digest("hex");
