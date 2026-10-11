@@ -34,6 +34,14 @@
   td, th { border-bottom:1px solid var(--line); padding:6px; text-align:left; vertical-align:top; }
   pre { white-space: pre-wrap; word-break: break-word; font-size:12px; margin:0; }
   .hidden { display:none !important; }
+  .paylink { display:inline-flex; align-items:center; justify-content:center; min-height:40px; margin-top:8px; padding:0 12px; border-radius:10px; border:1px solid var(--accent); color:var(--accent); font-weight:600; text-decoration:none; font-size:14px; }
+  .paylink[hidden] { display:none; }
+  .plan .paylink { width:100%; }
+  .gk-pay .paylink { margin:4px 4px 0 0; }
+  .keybox { margin-top:10px; padding:10px; border:2px solid var(--warn); border-radius:10px; background:var(--bg); }
+  .keybox code { word-break:break-all; font-size:13px; }
+  .keybox label { display:flex; gap:8px; align-items:center; color:var(--fg); margin:8px 0 0; font-size:14px; }
+  .keybox input[type=checkbox] { width:20px; min-height:20px; height:20px; }
   .plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
   .plan { border:1px solid var(--line); border-radius:12px; padding:12px; display:flex; flex-direction:column; }
   .plan h3 { margin:0; font-size:15px; }
@@ -52,6 +60,24 @@
     <label for="token">API key (stored on this device only)</label>
     <input id="token" type="password" autocomplete="off" placeholder="jvl_...">
   </div>
+
+  <section id="get-key" class="card" aria-labelledby="gk-title">
+    <h2 id="gk-title">Get your API key</h2>
+    <ol class="steps">
+      <li><b>Create a free key</b> (100 units/day). It's shown <b>once</b>.
+        <div><button class="primary" type="button" id="gk-create">Create free key</button></div>
+        <div id="gk-out" aria-live="polite"></div>
+      </li>
+      <li><b>Save it somewhere safe</b>, like a password manager or a secret env var (<code>export JEVLET_TOKEN=jvl_…</code>). Never commit it or put it in public code.</li>
+      <li><b>Send it on every request:</b> <code>Authorization: Bearer jvl_…</code>. The key field above does this for the tools on this page.</li>
+      <li><b>Check usage</b> in the Usage tab (units used today vs your daily cap).</li>
+      <li><b>Upgrade</b> to Pro ($19/mo, 5,000/day) or Team ($99/mo, 50,000/day):
+        <span class="gk-pay"><a class="paylink" data-link="pro" href="#" hidden>Pay with Stripe: Pro</a> <a class="paylink" data-link="team" href="#" hidden>Pay with Stripe: Team</a></span>
+        or use the Plans tab. Takes effect within a minute.</li>
+      <li><b>Lost it?</b> It can't be recovered (only a hash is stored). Create a new one. Paid plans stay on the old key, so contact the operator to move a plan.</li>
+    </ol>
+    <p class="muted"><button type="button" class="ghost" data-help="keys">Full key guide</button> <button type="button" class="ghost" data-help="examples">Worked examples</button></p>
+  </section>
 
   <nav role="tablist">
     <button role="tab" data-tab="decide" aria-selected="true">Decide</button>
@@ -124,6 +150,7 @@
         <div class="muted">per month</div>
         <ul><li>5,000 units / day</li><li>All adapters</li><li>Per-key calibration</li></ul>
         <button class="primary" type="button" data-plan="pro">Upgrade to Pro</button>
+        <a class="paylink" data-link="pro" href="#" hidden>Pay with Stripe</a>
       </div>
       <div class="plan">
         <h3>Team</h3>
@@ -131,6 +158,7 @@
         <div class="muted">per month</div>
         <ul><li>50,000 units / day</li><li>All adapters</li><li>Per-key calibration</li></ul>
         <button class="primary" type="button" data-plan="team">Upgrade to Team</button>
+        <a class="paylink" data-link="team" href="#" hidden>Pay with Stripe</a>
       </div>
     </div>
     <p class="muted">Upgrades apply to the API key entered above.</p>
@@ -139,6 +167,7 @@
 </main>
 
 <script>
+window.jevletApi = (...a) => api(...a); // used by assets/keys.js
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtPct = (x) => (x * 100).toFixed(1) + "%";
@@ -170,19 +199,9 @@ document.querySelectorAll("button[data-plan]").forEach((b) => {
     $("#p-out").innerHTML = `<p class="err">${esc(body.error?.code)}: ${esc(body.error?.detail)}</p>`;
   };
 });
-$("#p-free").onclick = async () => {
-  const r = await fetch("/v1/keys", { method: "POST" });
-  const body = await r.json().catch(() => ({}));
-  if (r.status === 201 && body.token) {
-    tokenEl.value = body.token;
-    storeSet("jevlet_token", body.token);
-    $("#p-out").innerHTML = `<p>Your key (shown once, saved on this device):</p><pre>${esc(body.token)}</pre><p class="muted">${esc(body.daily_cap)} units / day.</p>`;
-    loadAdapters();
-  } else if (r.status === 404) {
-    $("#p-out").innerHTML = `<p class="muted">Self-serve keys are not enabled on this instance. Ask the operator for a key.</p>`;
-  } else {
-    $("#p-out").innerHTML = `<p class="err">${esc(body.error?.code)}: ${esc(body.error?.detail)}</p>`;
-  }
+$("#p-free").onclick = () => {
+  document.getElementById("get-key").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("gk-create").focus({ preventScroll: true });
 };
 {
   const billing = new URLSearchParams(location.search).get("billing");
@@ -223,6 +242,7 @@ async function loadAdapters() {
   renderForm();
 }
 const adapterById = (id) => ADAPTERS.find((a) => a.id === id);
+window.jevletReloadAdapters = loadAdapters;
 
 function renderForm() {
   const a = adapterById($("#d-adapter").value);
@@ -395,5 +415,6 @@ loadAdapters();
 </script>
 <script type="module" src="/assets/help.js"></script>
 <script type="module" src="/assets/seasonal.js"></script>
+<script type="module" src="/assets/keys.js"></script>
 </body>
 </html>

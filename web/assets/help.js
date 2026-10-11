@@ -2,6 +2,8 @@
 // Plain ES module, no dependencies. Every number below mirrors the Worker code
 // (test/help.test.mjs checks FACTS against it so the docs cannot drift).
 
+import { EXAMPLES, examplesFor, exampleById, exampleCurl, exampleFetch, exampleResponse } from "./examples.js";
+
 export const FACTS = {
   adapters: {
     csqa: { head: "choice", tau: 0.6, votes: 5, input: "question (1–1000 chars) and choices (2–10 options, each up to 300 chars)" },
@@ -34,7 +36,9 @@ export const FACTS = {
   ],
 };
 
-export const TOPIC_IDS = ["overview", "decision", "adapters", "calibration", "usage", "keys", "plans", "errors", "batch", "eval", "quickstart"];
+export const TOPIC_IDS = ["overview", "decision", "adapters", "calibration", "usage", "keys", "plans", "errors", "batch", "eval", "quickstart", "examples"];
+// Which examples each help topic shows (see assets/examples.js).
+export const TOPIC_EXAMPLES = { decision: "decision", adapters: "adapters", calibration: "calibration", usage: "usage", keys: "keys", plans: "plans", errors: "errors", batch: "batch" };
 
 // Same smoothing as worker/core.js (aggregateChoice / aggregateBoolean).
 export function aggregateChoice(votes, K) {
@@ -161,15 +165,23 @@ function init() {
       after: setupMeter,
     },
     keys: {
-      title: "API keys & authentication",
+      title: "Get your API key",
       html: () => `
-        <p>Every <code>/v1</code> call (except the Stripe webhook) needs <code>Authorization: Bearer jvl_…</code>.</p>
-        <ul>
-          <li>The token is shown <b>once</b> when it is minted. Jevlet stores only its SHA-256 hash, so a lost token cannot be recovered; get a new one instead.</li>
-          <li>Each key carries its plan and daily cap. Usage, calibration, and billing are all tracked per key.</li>
-          <li>In this UI the key is kept in your browser's local storage on this device only. Clear it from the field to forget it.</li>
-          <li>The operator mints keys with <code>node tools/mkkey.mjs &lt;daily_cap&gt; [tier]</code>. A self-serve "Get a free key" button exists, but works only if the operator has enabled it.</li>
-        </ul>`,
+        <ol class="steps">
+          <li><b>Create a key.</b> Use <b>Create free key</b> in the "Get your API key" section on the home page, or call <code>POST /v1/keys</code>. Free keys get ${T.free.cap} units/day. Each network can create 3 keys per day.</li>
+          <li><b>Save it now.</b> The <code>jvl_…</code> token is shown <b>once</b>. Jevlet stores only its SHA-256 hash, so nobody can show it to you again. Keep it in a password manager or a secret environment variable (<code>export JEVLET_TOKEN=jvl_…</code>). Never commit it or ship it in public client code. This page keeps it only if you tick "Remember in this browser".</li>
+          <li><b>Send it on every request</b> as <code>Authorization: Bearer jvl_…</code>. All <code>/v1</code> endpoints need it except key creation, <code>/v1/config</code>, and the Stripe webhook.</li>
+          <li><b>Check usage</b> in the Usage tab or with <code>GET /v1/usage</code>: units used today (UTC) against your daily cap.</li>
+          <li><b>Upgrade</b> in the Plans tab: Pro $${T.pro.price}/mo (${T.pro.cap.toLocaleString()}/day) or Team $${T.team.price}/mo (${T.team.cap.toLocaleString()}/day). Payment applies to the key entered at the top and takes effect within a minute.</li>
+          <li><b>Lost it?</b> It can't be recovered. Create a new key. A paid plan stays attached to the old key, and there is no self-serve transfer, so contact the operator to move it.</li>
+        </ol>
+        <p class="muted">The operator can also mint keys with <code>node tools/mkkey.mjs &lt;daily_cap&gt; [tier]</code>.</p>`,
+    },
+    examples: {
+      title: "Worked examples",
+      html: () => `<p>Real requests and responses for every feature, captured from the live API (keys redacted; trimmed values are marked). Each one has curl, JavaScript <code>fetch</code>, and a one-line guide to reading the response.</p>
+        <div class="hm-topics">${EXAMPLES.map((e) => `<button type="button" data-example="${e.id}">${esc(e.title)}</button>`).join("")}</div>
+        ${EXAMPLES.map(renderExample).join("")}`,
     },
     plans: {
       title: "Plans & billing",
@@ -244,6 +256,56 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     },
   };
 
+  function renderExample(ex) {
+    const note = ex.trimmed ? `Live response (${esc(ex.trimmed)})` : "Live response, unedited";
+    return `<div class="ex" id="ex-${ex.id}">
+      <h3>Example: ${esc(ex.title)}</h3>
+      <p class="muted"><code>${ex.method} ${ex.path}</code> → HTTP ${ex.status}</p>
+      ${code(exampleCurl(ex, origin), `curl for ${ex.title}`)}
+      <details><summary>JavaScript fetch</summary>${code(exampleFetch(ex, origin), `fetch for ${ex.title}`)}</details>
+      <p class="ex-label">${note}</p>
+      ${code(exampleResponse(ex), `Response for ${ex.title}`)}
+      <p class="ex-read"><b>How to read it:</b> ${esc(ex.read)}</p>
+      ${ex.tryIt ? `<button type="button" class="ghost" data-try="${ex.id}">Try it in the app</button>` : ""}
+    </div>`;
+  }
+  function withExamples(id, html) {
+    const f = TOPIC_EXAMPLES[id];
+    const list = f ? examplesFor(f) : [];
+    return list.length ? html + `<h3 class="ex-head">Worked example${list.length > 1 ? "s" : ""}</h3>` + list.map(renderExample).join("") : html;
+  }
+  function tryExample(id) {
+    const ex = exampleById(id);
+    if (!ex?.tryIt) return;
+    closeHelp();
+    const t = ex.tryIt;
+    document.querySelector(`nav button[data-tab="${t.tab}"]`)?.click();
+    if (t.tab === "decide") {
+      const sel = $("#d-adapter");
+      if (sel && [...sel.options].some((o) => o.value === t.adapter)) { sel.value = t.adapter; sel.dispatchEvent(new Event("change")); }
+      for (const [k, v] of Object.entries(t.fields)) { const el = document.getElementById("f-" + k); if (el) el.value = v; }
+      if (t.votes) $("#d-votes").value = t.votes;
+      $("#d-form button[type=submit]")?.focus();
+    } else if (t.tab === "batch") {
+      $("#b-lines").value = ex.batch.map((b) => JSON.stringify(b)).join("\n");
+      $("#b-run")?.focus();
+    } else if (t.tab === "calibrate") {
+      const sel = $("#c-adapter");
+      if (sel && [...sel.options].some((o) => o.value === t.adapter)) sel.value = t.adapter;
+      $("#c-lines").value = JSON.stringify({ decision_id: "<decision_id from your own Decide result>", truth: "laptop" });
+      $("#c-lines")?.focus();
+    }
+  }
+  function openExample(id, from) {
+    const ex = exampleById(id);
+    if (!ex) return;
+    if (cleanup) { cleanup(); cleanup = null; }
+    $("#hm-title", dlg).textContent = ex.title;
+    $("#hm-body", dlg).innerHTML = renderExample(ex) + `<p class="muted"><button type="button" class="ghost" data-help="examples">All examples</button></p>`;
+    if (!dlg.open) { opener = from || document.activeElement; dlg.showModal(); }
+    $(".hm-close", dlg).focus();
+  }
+
   function topicLinks(ids) {
     return ids.map((id) => `<button type="button" data-help="${id}">${esc(TOPICS[id].title)}</button>`).join("");
   }
@@ -261,7 +323,7 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     const t = TOPICS[id] || TOPICS.overview;
     if (cleanup) { cleanup(); cleanup = null; }
     $("#hm-title", dlg).textContent = t.title;
-    $("#hm-body", dlg).innerHTML = t.html();
+    $("#hm-body", dlg).innerHTML = withExamples(TOPICS[id] ? id : "overview", t.html());
     $("#hm-body", dlg).scrollTop = 0;
     if (!dlg.open) { opener = from || document.activeElement; dlg.showModal(); }
     cleanup = t.after ? t.after(dlg) : null;
@@ -279,6 +341,10 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     if (c) copyFrom(c);
     const h = e.target.closest("[data-help]");
     if (h) openHelp(h.dataset.help);
+    const x = e.target.closest("[data-example]");
+    if (x) { const el = dlg.querySelector("#ex-" + x.dataset.example); if (el && !x.closest(".ex")) el.scrollIntoView({ block: "start" }); else openExample(x.dataset.example); }
+    const tr = e.target.closest("[data-try]");
+    if (tr) tryExample(tr.dataset.try);
     if (e.target.closest("[data-tour-start]")) { closeHelp(); startTour(); }
   });
   dlg.addEventListener("keydown", (e) => {
@@ -390,7 +456,7 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     b.textContent = "?";
     target[where](b);
   };
-  addBtn($('label[for="token"]'), "keys", "API keys");
+  addBtn($('label[for="token"]'), "keys", "Get your API key");
   addBtn($('section[data-tab="decide"] h2'), "decision", "How a decision works");
   addBtn($('label[for="d-adapter"]'), "adapters", "Adapters");
   addBtn($('label[for="d-tau"]'), "decision", "tau and abstain");
@@ -408,7 +474,7 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     bar.appendChild(h1);
     const acts = document.createElement("div");
     acts.className = "actions";
-    acts.innerHTML = `<button type="button" class="ghost" data-help="overview">Guide</button><button type="button" class="ghost" data-help="quickstart">API</button><button type="button" class="ghost" data-help="errors">Errors</button><button type="button" class="ghost" data-tour-start>Tour</button>`;
+    acts.innerHTML = `<button type="button" class="ghost" data-help="overview">Guide</button><button type="button" class="ghost" data-help="quickstart">API</button><button type="button" class="ghost" data-help="examples">Examples</button><button type="button" class="ghost" data-help="errors">Errors</button><button type="button" class="ghost" data-tour-start>Tour</button>`;
     bar.appendChild(acts);
   }
 
@@ -416,17 +482,20 @@ curl -s ${origin}/v1/usage    -H "authorization: Bearer ${KEY}"`, "Adapters and 
     if (dlg.contains(e.target)) return;
     const h = e.target.closest("[data-help]");
     if (h) { e.preventDefault(); openHelp(h.dataset.help, h); }
+    const x = e.target.closest("[data-example]");
+    if (x) { e.preventDefault(); openExample(x.dataset.example, x); }
     if (e.target.closest("[data-tour-start]")) startTour();
   });
 
   // Public hook (used by other UI sections to open a topic)
-  window.jevletHelp = { open: openHelp, tour: () => startTour() };
+  window.jevletHelp = { open: openHelp, example: openExample, tour: () => startTour() };
 
   // ---------- first-visit guided tour ----------
   const TOUR_KEY = "jevlet_tour_v1";
   const STEPS = [
     { sel: "main > .topbar", title: "Welcome to Jevlet", text: "A typed decision API: structured input in, a typed choice or true/false out, with a probability distribution or an explicit abstain. This tour takes a minute; the Guide button reopens everything." },
-    { sel: "#token", title: "Your API key", text: "Paste your jvl_… key here. It stays in this browser only. Every request is metered against this key's daily cap." },
+    { sel: "#get-key", title: "Get your API key", text: "No key yet? Create a free one here (100 units/day). It is shown once, so save it. The steps also cover sending it, checking usage, upgrading, and what to do if it's lost." },
+    { sel: "#token", title: "Your API key", text: "Paste your jvl_… key here. It's kept in this browser only if you choose. Every request is metered against this key's daily cap." },
     { sel: "nav[role=tablist]", title: "Five tools", text: "Decide runs one decision, Batch runs many, Calibrate teaches Jevlet your ground truth, Usage shows today's units, and Plans handles upgrades." },
     { sel: 'section[data-tab="decide"] h2 .help-btn', title: "Help is one click away", text: "Look for the ? buttons. They open short explainers, including an interactive vote → distribution → decision demo." },
     { sel: 'label[for="d-tau"]', title: "tau = when to abstain", text: "If the top probability is below tau, Jevlet abstains instead of guessing. Leave it blank to use the adapter's default." },

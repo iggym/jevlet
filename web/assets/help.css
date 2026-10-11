@@ -70,3 +70,12 @@ dialog.hm[open] { animation:hm-in .22s ease-out; }
   dialog.hm[open], .chip, .sim .row .bar > i, .sim-out, .meter > i, .meter > b, .tour-spot, .tour-pop, .help-btn { animation:none !important; transition:none !important; }
   .chip { opacity:1; transform:none; }
 }
+
+/* worked examples + key guide */
+.ex { border-top:1px solid var(--line); margin-top:14px; padding-top:6px; }
+.ex details summary { cursor:pointer; font-size:13px; color:var(--accent); margin:4px 0; }
+.ex-label { font-size:12px; color:var(--muted); margin:8px 0 0; text-transform:uppercase; letter-spacing:.04em; }
+.ex-read { background:var(--bg); border-left:3px solid var(--accent); padding:6px 10px; border-radius:6px; }
+.ex-head { margin-top:18px; }
+ol.steps { padding-left:20px; }
+ol.steps li { margin:6px 0; }

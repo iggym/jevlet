@@ -346,15 +346,26 @@ async function handleWebhook(req, env) {
 
 async function handleSelfServeKey(req, env) {
   if (env.SELF_SERVE_KEYS !== "true") return json(err("NOT_FOUND", "/v1/keys"), 404);
+  // Atomic per-IP daily limit (same conditional D1 UPDATE as the unit budget), so parallel
+  // requests cannot mint more than SELF_SERVE_PER_IP_PER_DAY. Requests without an IP share one bucket.
   const ip = req.headers.get("cf-connecting-ip") || "unknown";
-  const ipKey = `ipkeys:${await sha256Hex(ip)}:${today()}`;
-  const n = Number((await env.KV.get(ipKey)) ?? 0);
-  if (n >= SELF_SERVE_PER_IP_PER_DAY) return json(err("RATE_LIMITED", "", "too many keys today"), 429);
-  await env.KV.put(ipKey, String(n + 1), { expirationTtl: 172800 });
+  const r = await reserve(env.DB, "selfserve:" + (await sha256Hex(ip)), today(), 1, SELF_SERVE_PER_IP_PER_DAY, "units");
+  if (!r.ok) return json(err("RATE_LIMITED", "", "too many keys today"), 429);
   const token = await mintToken();
   const rec = { tier: "free", daily_cap: TIERS.free.daily_cap, created: new Date().toISOString(), source: "self_serve" };
   await env.KV.put("key:" + (await sha256Hex(token)), JSON.stringify(rec));
   return json({ token, tier: rec.tier, daily_cap: rec.daily_cap, note: "Shown once. Only its hash is stored." }, 201);
+}
+
+// ---------- GET /v1/config (public, no secrets) ----------
+// Lets the static UI know whether self-serve keys are on and where the Payment Links are.
+
+function handleConfig(env) {
+  return json({
+    self_serve_keys: env.SELF_SERVE_KEYS === "true",
+    payment_links: { pro: env.STRIPE_LINK_PRO || null, team: env.STRIPE_LINK_TEAM || null },
+    tiers: Object.fromEntries(Object.entries(TIERS).map(([k, v]) => [k, { daily_cap: v.daily_cap }])),
+  });
 }
 
 // ---------- entry ----------
@@ -369,6 +380,7 @@ async function route(req, env, ctx, url) {
   if (p === "/v1/billing/checkout" && m === "POST") return handleCheckout(req, env);
   if (p === "/v1/billing/webhook" && m === "POST") return handleWebhook(req, env);
   if (p === "/v1/keys" && m === "POST") return handleSelfServeKey(req, env);
+  if (p === "/v1/config" && m === "GET") return handleConfig(env);
   return json(err("NOT_FOUND", p), 404);
 }
 

@@ -30,6 +30,8 @@
 .s-hero-cta { display:flex; flex-wrap:wrap; gap:8px; }
 .s-chip { display:inline-flex; align-items:center; min-height:40px; padding:0 14px; border-radius:999px; font:inherit; font-size:14px; font-weight:600; color:#fff; text-decoration:none; cursor:pointer;
   background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.55); transition:background .2s ease, transform .2s ease; }
+.s-chip-key { background:var(--season-1); border-color:#fff; }
+.s-card-actions { flex-wrap:wrap; }
 .s-chip:hover { background:rgba(255,255,255,.3); transform:translateY(-1px); }
 .s-chip:focus-visible, .s-pill:focus-visible, .s-act:focus-visible, .s-grid:focus-visible, .s-linkbtn:focus-visible { outline:3px solid var(--season-1); outline-offset:2px; }
 .s-chip[aria-pressed="false"] { opacity:.8; }

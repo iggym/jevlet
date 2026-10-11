@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHmac, createHash } from "node:crypto";
 import worker from "../worker/worker.js";
 import * as B from "../worker/billing.js";
+import { FakeD1 } from "./helpers/fakes.mjs";
 
 class KV {
   constructor() { this.m = new Map(); }
@@ -19,6 +20,7 @@ let env, realFetch, stripeCalls;
 beforeEach(() => {
   env = {
     KV: new KV(),
+    DB: new FakeD1(),
     STRIPE_SECRET_KEY: "sk_test_abc",
     STRIPE_WEBHOOK_SECRET: SECRET,
     STRIPE_PRICE_PRO: "price_pro",
@@ -240,4 +242,107 @@ test("self-serve keys: off by default; when on, mints a free key and rate-limits
   for (let i = 1; i < B.SELF_SERVE_PER_IP_PER_DAY; i++) assert.equal((await req("/v1/keys", { headers: h })).status, 201);
   assert.equal((await req("/v1/keys", { headers: h })).status, 429);
   assert.equal((await req("/v1/keys", { headers: { "cf-connecting-ip": "198.51.100.1" } })).status, 201);
+});
+
+test("self-serve keys: per-IP limit is atomic under concurrency (D1, not a KV counter)", async () => {
+  env.SELF_SERVE_KEYS = "true";
+  const h = { "cf-connecting-ip": "203.0.113.50" };
+  const rs = await Promise.all(Array.from({ length: 12 }, () => req("/v1/keys", { headers: h })));
+  assert.equal(rs.filter((r) => r.status === 201).length, B.SELF_SERVE_PER_IP_PER_DAY);
+  assert.equal(rs.filter((r) => r.status === 429).length, 12 - B.SELF_SERVE_PER_IP_PER_DAY);
+  assert.ok(![...env.KV.m.keys()].some((k) => k.startsWith("ipkeys:")), "no KV counter");
+  const row = await env.DB.prepare("SELECT units FROM usage_daily WHERE key_id LIKE 'selfserve:%'").first();
+  assert.equal(row.units, B.SELF_SERVE_PER_IP_PER_DAY);
+  assert.ok(!JSON.stringify(row).includes("203.0.113.50"));
+});
+
+test("GET /v1/config exposes self-serve flag and Payment Links, no secrets", async () => {
+  env.SELF_SERVE_KEYS = "true";
+  env.STRIPE_LINK_PRO = "https://buy.stripe.com/test_pro";
+  const r = await req("/v1/config", { method: "GET" });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.payment_links, { pro: "https://buy.stripe.com/test_pro", team: null });
+  assert.equal(r.body.self_serve_keys, true);
+  assert.deepEqual(r.body.tiers, { free: { daily_cap: 100 }, pro: { daily_cap: 5000 }, team: { daily_cap: 50000 } });
+  assert.ok(!JSON.stringify(r.body).includes("sk_test") && !JSON.stringify(r.body).includes("whsec"));
+});
+
+// ---------- Payment Links ----------
+
+function stubStripeSub(price, metadata = {}) {
+  globalThis.fetch = async (url, init = {}) => {
+    stripeCalls.push({ url, init });
+    if (String(url).endsWith("/subscriptions/sub_pl") && (init.method ?? "GET") === "GET")
+      return new Response(JSON.stringify({ id: "sub_pl", metadata, items: { data: [{ price: { id: price } }] } }));
+    return new Response(JSON.stringify({ id: "sub_pl" }));
+  };
+}
+const plSession = (keyId, extra = {}) => ({
+  id: "cs_pl", mode: "subscription", payment_status: "paid", client_reference_id: keyId,
+  subscription: "sub_pl", customer: "cus_pl", payment_link: "plink_1", metadata: {}, ...extra,
+});
+
+test("payment link: session without metadata.plan -> plan from subscription price, sub tagged with key_id, cancel -> free", async () => {
+  const keyId = await addKey("jvl_paylink");
+  stubStripeSub("price_pro");
+  let r = await postEvent(evt("evt_pl1", "checkout.session.completed", plSession(keyId)));
+  assert.equal(r.status, 200);
+  let rec = await env.KV.get("key:" + keyId, "json");
+  assert.equal(rec.tier, "pro");
+  assert.equal(rec.daily_cap, 5000);
+  assert.equal(rec.stripe_subscription, "sub_pl");
+  const tag = stripeCalls.find((c) => c.init.method === "POST");
+  assert.ok(tag, "subscription was tagged");
+  const f = new URLSearchParams(tag.init.body);
+  assert.equal(f.get("metadata[key_id]"), keyId);
+  assert.equal(f.get("metadata[plan]"), "pro");
+  // later events carry metadata.key_id (from the tag): cancel drops to free
+  r = await postEvent(evt("evt_pl2", "customer.subscription.deleted", { id: "sub_pl", customer: "cus_pl", status: "canceled", metadata: { key_id: keyId } }, now() + 5));
+  rec = await env.KV.get("key:" + keyId, "json");
+  assert.equal(rec.tier, "free");
+  assert.equal(rec.daily_cap, 100);
+});
+
+test("payment link: team price, unpaid session, unknown price, no key, live key without opt-in", async () => {
+  const keyId = await addKey("jvl_paylink2");
+  stubStripeSub("price_team");
+  await postEvent(evt("evt_pl3", "checkout.session.completed", plSession(keyId)));
+  assert.equal((await env.KV.get("key:" + keyId, "json")).daily_cap, 50000);
+
+  const k2 = await addKey("jvl_paylink3");
+  stripeCalls = [];
+  await postEvent(evt("evt_pl4", "checkout.session.completed", plSession(k2, { payment_status: "unpaid" })));
+  assert.equal((await env.KV.get("key:" + k2, "json")).tier, "free");
+  assert.equal(stripeCalls.length, 0, "unpaid: no Stripe lookup");
+
+  stubStripeSub("price_unknown");
+  await postEvent(evt("evt_pl5", "checkout.session.completed", plSession(k2)));
+  assert.equal((await env.KV.get("key:" + k2, "json")).tier, "free");
+
+  stubStripeSub("price_pro");
+  const r = await postEvent(evt("evt_pl6", "checkout.session.completed", plSession(undefined)));
+  assert.equal(r.status, 200);
+
+  env.STRIPE_SECRET_KEY = "sk_live_x";
+  stripeCalls = [];
+  await postEvent(evt("evt_pl7", "checkout.session.completed", plSession(k2)));
+  assert.equal(stripeCalls.length, 0, "live key never used without STRIPE_LIVE_MODE");
+  assert.equal((await env.KV.get("key:" + k2, "json")).tier, "free");
+});
+
+test("payment link: session that already carries metadata.plan still tags the subscription", async () => {
+  const keyId = await addKey("jvl_paylink4");
+  stubStripeSub("price_pro");
+  await postEvent(evt("evt_pl8", "checkout.session.completed", plSession(keyId, { metadata: { plan: "pro" } })));
+  assert.equal((await env.KV.get("key:" + keyId, "json")).tier, "pro");
+  assert.ok(stripeCalls.some((c) => c.init.method === "POST" && new URLSearchParams(c.init.body).get("metadata[key_id]") === keyId));
+});
+
+test("UI payment link helper appends client_reference_id = sha256(key)", async () => {
+  const { keyIdOf, paymentLinkFor } = await import("../web/assets/keys.js");
+  const id = await keyIdOf("jvl_abc");
+  assert.equal(id, sha("jvl_abc"));
+  assert.equal(paymentLinkFor("https://buy.stripe.com/test_x", id), "https://buy.stripe.com/test_x?client_reference_id=" + id);
+  assert.equal(paymentLinkFor("https://buy.stripe.com/test_x", "jvl_abc"), null, "never the raw key");
+  assert.equal(paymentLinkFor(null, id), null);
 });
