@@ -186,7 +186,7 @@ $("#p-free").onclick = async () => {
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing) {
     const msg = billing === "success"
-      ? "Payment received. Your key's plan updates within a few seconds; check the Usage tab."
+      ? "Payment received. Your key's plan upgrade takes effect within a minute; check the Usage tab."
       : "Checkout cancelled. Nothing was charged.";
     setTimeout(() => {
       document.querySelector('nav button[data-tab="plans"]').click();
