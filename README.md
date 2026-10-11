@@ -92,7 +92,7 @@ Tiers (confirmed; caps defined in `worker/billing.js` `TIERS`, prices in Stripe)
 Endpoints:
 
 - `POST /v1/billing/checkout` `{"plan":"pro"|"team"}` with the caller's Bearer key. Returns a Stripe Checkout `url` (subscription mode). The session carries `client_reference_id` and `metadata.key_id` = the key's SHA-256 id, never the raw token.
-- `POST /v1/billing/webhook`, called by Stripe. Verifies `Stripe-Signature` (HMAC-SHA256, 300 s tolerance), then writes `{tier, daily_cap}` to `key:<key_id>` on `checkout.session.completed` and `customer.subscription.created/updated`, and drops to Free on `customer.subscription.deleted` (or status `canceled`/`unpaid`/`incomplete_expired`/`paused`). Each event id is processed once (KV `stripe_evt:<id>`, 30-day TTL), and older events never overwrite newer ones.
+- `POST /v1/billing/webhook`, called by Stripe. Verifies `Stripe-Signature` (HMAC-SHA256, 300 s tolerance), then writes `{tier, daily_cap}` to `key:<key_id>` on `checkout.session.completed` and `customer.subscription.created/updated`, and drops to Free on `customer.subscription.deleted` (or status `canceled`/`unpaid`/`incomplete_expired`/`paused`). Each event id is processed once (KV `stripe_evt:<id>`, 30-day TTL), and older events never overwrite newer ones. Plan changes take effect within a minute (Workers KV is eventually consistent across locations).
 - `POST /v1/keys`: self-serve Free key, **off unless `SELF_SERVE_KEYS = "true"`**. Limited to 3 per client IP per day (best effort).
 
 Setup (Stripe **test mode**):
