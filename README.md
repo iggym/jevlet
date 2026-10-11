@@ -35,7 +35,7 @@ The model behind it is swappable. The contract (typed in, typed out, calibrated,
 npm install
 npx wrangler kv namespace create KV          # paste the id into wrangler.toml
 npx wrangler d1 create jevlet                # paste the id into wrangler.toml
-npm run migrate
+npm run migrate                              # applies all migrations, including 0002
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY
 # optional: JEV_API_KEY and JEV_URL
@@ -75,7 +75,9 @@ curl -s https://<host>/v1/decide -H "authorization: Bearer $JEVLET_TOKEN" \
 ## Design decisions to know about
 
 - **Budget vs. cache order.** Cache hits are served before the budget check, since they call no provider. The budget check reserves the worst case (one unit per vote) before any provider call. `cost_units` reports actual calls made.
-- **Calibration is per calling key.** `/v1/calibrate` fits temperature only on the labels that key submitted. This keeps one customer's labels from moving another's output. The fitted value is still stored globally per adapter in KV.
+- **Calibration is per calling key.** `/v1/calibrate` fits temperature only on the labels that key submitted and stores it under `cal:<adapter>:<key_id>`. `/v1/decide` reads only the caller's entry; a key with no fit of its own is served uncalibrated (adapter tau, no temperature), never another key's fit. Cache entries are keyed on the calibration applied.
+- **Atomic budget.** `/v1/decide` reserves `votes` units with one conditional D1 `UPDATE ... WHERE units + ? <= cap RETURNING`, so concurrent requests cannot overspend. The reservation is settled to actual `cost_units` after the call and released if every provider fails.
+- **`/v1/calibrate` limits.** At most 500 labels per call; duplicate `decision_id`s collapse (last wins, and re-labelling replaces the stored label); labels are accepted only for the caller's own decisions; and each key has a daily label cap (`daily_label_cap` on the key record, default 2000; a call with no labels counts as 1).
 - **`decisions.distribution` and `decisions.labels` are extra columns** beyond the spec's data model. Calibration needs the full distribution, not just the top confidence, and the truth string needs the label order to map to an index.
 - **Model names are placeholders.** `GEMINI_MODEL`, `GROQ_MODEL`, and `WORKERS_AI_MODEL` default to names current when this was written. Verify them, and the free-tier limits, before launch. KV write limits are usually the first wall.
 
