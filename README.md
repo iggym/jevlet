@@ -81,7 +81,7 @@ curl -s https://<host>/v1/decide -H "authorization: Bearer $JEVLET_TOKEN" \
 
 ## Billing (Stripe)
 
-Tiers (placeholders to confirm before launch; defined in `worker/billing.js` `TIERS`):
+Tiers (confirmed; caps defined in `worker/billing.js` `TIERS`, prices in Stripe):
 
 | Tier | Price | Daily cap |
 |------|-------|-----------|
