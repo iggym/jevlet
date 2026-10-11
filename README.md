@@ -31,6 +31,8 @@ The model behind it is swappable. The contract (typed in, typed out, calibrated,
 
 ## Setup
 
+Requires Node.js 22 or newer (Wrangler 4 refuses to run on older versions; see `.nvmrc`).
+
 ```bash
 npm install
 npx wrangler kv namespace create KV          # paste the id into wrangler.toml
@@ -53,6 +55,12 @@ Test the pure logic (no network, no Cloudflare):
 
 ```bash
 npm test
+```
+
+Bundle the Worker and check bindings without deploying (also run in CI):
+
+```bash
+npm run check
 ```
 
 Run the eval sample against a deployed instance:
