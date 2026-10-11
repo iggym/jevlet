@@ -34,6 +34,8 @@ export const FACTS = {
   ],
 };
 
+export const TOPIC_IDS = ["overview", "decision", "adapters", "calibration", "usage", "keys", "plans", "errors", "batch", "eval", "quickstart"];
+
 // Same smoothing as worker/core.js (aggregateChoice / aggregateBoolean).
 export function aggregateChoice(votes, K) {
   const c = new Array(K).fill(0);
@@ -67,7 +69,7 @@ function init() {
         <p>Jevlet is a <b>typed decision API</b>. You send a <i>state</i> (structured input) and pick an <i>adapter</i> (a declared question). It returns a <b>typed decision</b>: a choice from your options or a true/false value, plus a probability distribution. If it is not confident enough, it explicitly <b>abstains</b>. It never returns free text.</p>
         <p>Under the hood several model votes are collected and aggregated. The contract is the product: typed in, typed out, calibrated, abstaining, metered.</p>
         <h3>Explore</h3>
-        <div class="hm-topics">${topicLinks(["decision", "adapters", "calibration", "usage", "keys", "plans", "errors", "batch", "quickstart"])}</div>
+        <div class="hm-topics">${topicLinks(TOPIC_IDS.filter((t) => t !== "overview"))}</div>
         <p class="muted">New here? <button type="button" class="ghost" data-tour-start>Take the 1-minute tour</button></p>`,
     },
     decision: {
@@ -199,6 +201,15 @@ function init() {
         <p>Paste one JSON request per line (each needs <code>adapter</code> and <code>state</code>; <code>task_id</code> and <code>options</code> are optional). The UI sends them to <code>/v1/decide</code>, ${FACTS.batchConcurrency} at a time, shows the first 50 rows, and lets you export every row as CSV.</p>
         ${code(`{"adapter":"csqa","task_id":"t1","state":{"question":"Where would you keep a book you plan to read later?","choices":["oven","bookshelf","refrigerator","sink"]}}`, "Batch line example")}
         <p class="muted">Each line is a normal decision: it uses units, respects your daily cap, and can be served from cache.</p>`,
+    },
+    eval: {
+      title: "Eval runner (CLI)",
+      html: () => `
+        <p>The repo ships a small eval runner. It sends every line of a JSONL file to <code>/v1/decide</code> on a deployed instance (with <code>cache: false</code>) and prints a summary.</p>
+        ${code(`JEVLET_URL=${origin} JEVLET_TOKEN=jvl_… npm run eval`, "Eval command")}
+        <p>Each line is <code>{"adapter": "csqa", "state": {…}, "truth": "laptop"}</code> (for booleans, <code>"truth": true</code>). The sample set is <code>eval/sets/sample.jsonl</code>.</p>
+        <p>Output fields: <code>items</code>, <code>errors</code>, <code>accuracy_on_kept</code>, <code>accuracy_overall_abstain_as_wrong</code>, <code>abstention_rate</code>, <code>cost_units_per_decision</code>, <code>latency_ms_p50</code>, <code>latency_ms_p95</code>.</p>
+        <p class="muted">It makes real decisions, so it uses units from the key's daily cap.</p>`,
     },
     quickstart: {
       title: "API quickstart",
