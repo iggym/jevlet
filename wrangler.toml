@@ -1,0 +1,28 @@
+name = "jevlet"
+main = "worker/worker.js"
+compatibility_date = "2026-01-01"
+
+# Static UI (web/index.html) served for every non-/v1 path.
+[assets]
+directory = "./web"
+binding = "ASSETS"
+
+# Replace the IDs with the output of:
+#   wrangler kv namespace create KV
+#   wrangler d1 create jevlet
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "jevlet"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# Optional Workers AI fallback. Uncomment to enable.
+# [ai]
+# binding = "AI"
+
+# Secrets (never commit): wrangler secret put GEMINI_API_KEY / GROQ_API_KEY / JEV_API_KEY
+# Optional vars: GEMINI_MODEL, GROQ_MODEL, WORKERS_AI_MODEL, JEV_URL

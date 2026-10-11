@@ -1,0 +1,17 @@
+{
+  "name": "jevlet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed System-One decision API: typed in, typed out, calibrated, abstaining, metered.",
+  "scripts": {
+    "test": "node --test test/core.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply jevlet --remote",
+    "eval": "node eval/run.mjs eval/sets/sample.jsonl"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

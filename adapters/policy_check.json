@@ -1,0 +1,16 @@
+{
+  "id": "policy_check",
+  "description": "Boolean: does the case comply with the policy? Judges only from the text provided.",
+  "head": "boolean",
+  "input_schema": {
+    "type": "object",
+    "required": ["policy", "case"],
+    "properties": {
+      "policy": { "type": "string", "minLength": 1, "maxLength": 4000 },
+      "case": { "type": "string", "minLength": 1, "maxLength": 4000 }
+    }
+  },
+  "question": "Does the case comply with the policy? Judge only from the text provided.",
+  "tau": 0.7,
+  "votes": 5
+}

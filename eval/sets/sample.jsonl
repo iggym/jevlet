@@ -1,0 +1,4 @@
+{"adapter":"csqa","state":{"question":"A Google search can be conducted on what popular portable electronic device?","choices":["lab","desktop computer","laptop","server","bookshelf"]},"truth":"laptop"}
+{"adapter":"csqa","state":{"question":"Where would you keep a book you plan to read later?","choices":["oven","bookshelf","refrigerator","sink"]},"truth":"bookshelf"}
+{"adapter":"policy_check","state":{"policy":"Refunds are allowed within 30 days with a receipt.","case":"Customer returned an item after 12 days with a receipt."},"truth":true}
+{"adapter":"policy_check","state":{"policy":"Refunds are allowed within 30 days with a receipt.","case":"Customer asked for a refund 45 days after purchase, no receipt."},"truth":false}

@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jevlet</title>
+<style>
+  :root { --fg:#1b1b1f; --muted:#6b6b76; --bg:#f6f6f8; --card:#fff; --line:#dcdce3; --accent:#2b5fd9; --warn:#b45309; --bad:#c0392b; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#ececf1; --muted:#9a9aa6; --bg:#121216; --card:#1b1b22; --line:#33333d; --accent:#7aa2ff; --warn:#f0a85a; --bad:#ff7b6b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 680px; margin: 0 auto; padding: 14px; }
+  h1 { font-size: 20px; margin: 6px 0 10px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  nav { display:flex; gap:6px; margin-bottom:12px; }
+  nav button { flex:1; min-height:44px; border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:10px; font:inherit; }
+  nav button[aria-selected="true"] { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select, textarea { width:100%; min-height:44px; font:inherit; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  textarea { min-height:96px; font-family: ui-monospace, Menlo, monospace; font-size:13px; }
+  button.primary { min-height:44px; width:100%; margin-top:12px; background:var(--accent); color:#fff; border:0; border-radius:10px; font:inherit; font-weight:600; }
+  .row { display:grid; grid-template-columns: minmax(70px, 1fr) 2fr 52px; gap:10px; align-items:center; margin:8px 0; font-size:14px; }
+  .bar { position:relative; height:14px; background:var(--line); border-radius:7px; }
+  .bar > i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:7px; }
+  .tau { position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--warn); }
+  .muted { color:var(--muted); font-size:13px; }
+  .abstain { color:var(--warn); font-weight:600; }
+  .err { color:var(--bad); font-weight:600; }
+  .big { font-size:22px; font-weight:700; margin:4px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { border-bottom:1px solid var(--line); padding:6px; text-align:left; vertical-align:top; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size:12px; margin:0; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Jevlet</h1>
+
+  <div class="card">
+    <label for="token">API key (stored on this device only)</label>
+    <input id="token" type="password" autocomplete="off" placeholder="jvl_...">
+  </div>
+
+  <nav role="tablist">
+    <button role="tab" data-tab="decide" aria-selected="true">Decide</button>
+    <button role="tab" data-tab="batch" aria-selected="false">Batch</button>
+    <button role="tab" data-tab="calibrate" aria-selected="false">Calibrate</button>
+    <button role="tab" data-tab="usage" aria-selected="false">Usage</button>
+  </nav>
+
+  <!-- DECIDE -->
+  <section data-tab="decide" class="card">
+    <h2>Decide</h2>
+    <form id="d-form">
+      <label for="d-adapter">Adapter</label>
+      <select id="d-adapter"></select>
+      <div id="d-fields"></div>
+      <label for="d-votes">Votes (1 to 9, blank for adapter default)</label>
+      <input id="d-votes" type="number" min="1" max="9">
+      <label for="d-tau">Tau override (0 to 1, blank for default)</label>
+      <input id="d-tau" type="number" step="0.01" min="0.01" max="0.99">
+      <button class="primary" type="submit">Run decision</button>
+    </form>
+    <div id="d-out"></div>
+  </section>
+
+  <!-- BATCH -->
+  <section data-tab="batch" class="card hidden">
+    <h2>Batch</h2>
+    <p class="muted">One JSON request per line. Each line needs an <code>adapter</code> and <code>state</code>. Runs 4 at a time.</p>
+    <label for="b-lines">JSON lines</label>
+    <textarea id="b-lines" placeholder='{"adapter":"csqa","task_id":"t1","state":{"question":"...","choices":["a","b"]}}'></textarea>
+    <button class="primary" id="b-run" type="button">Run batch</button>
+    <div id="b-out"></div>
+  </section>
+
+  <!-- CALIBRATE -->
+  <section data-tab="calibrate" class="card hidden">
+    <h2>Calibrate</h2>
+    <p class="muted">Label past decisions with the truth. Use the <code>decision_id</code> shown on the Decide tab. Lines look like <code>{"decision_id":"...","truth":"laptop"}</code>. For booleans use <code>"true"</code> or <code>"false"</code>. Temperature is applied only after 200 labels.</p>
+    <label for="c-adapter">Adapter</label>
+    <select id="c-adapter"></select>
+    <label for="c-lines">Labels (JSON lines)</label>
+    <textarea id="c-lines"></textarea>
+    <button class="primary" id="c-run" type="button">Save labels and refit</button>
+    <div id="c-out"></div>
+  </section>
+
+  <!-- USAGE -->
+  <section data-tab="usage" class="card hidden">
+    <h2>Usage</h2>
+    <button class="primary" id="u-refresh" type="button" style="margin-top:0">Refresh</button>
+    <div id="u-out"></div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtPct = (x) => (x * 100).toFixed(1) + "%";
+
+function storeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+const tokenEl = $("#token");
+tokenEl.value = storeGet("jevlet_token") || "";
+tokenEl.addEventListener("change", () => storeSet("jevlet_token", tokenEl.value.trim()));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { "content-type": "application/json", authorization: "Bearer " + tokenEl.value.trim(), ...(opts.headers || {}) },
+  });
+  const body = await r.json().catch(() => ({ error: { code: "BAD_RESPONSE", detail: r.statusText } }));
+  return { status: r.status, body };
+}
+
+// ---- tabs ----
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+    document.querySelectorAll("section[data-tab]").forEach((s) => s.classList.toggle("hidden", s.dataset.tab !== b.dataset.tab));
+    if (b.dataset.tab === "usage") loadUsage();
+  };
+});
+
+// ---- adapters ----
+let ADAPTERS = [];
+async function loadAdapters() {
+  const { status, body } = await api("/v1/adapters");
+  if (status !== 200) {
+    $("#d-out").innerHTML = `<p class="err">${esc(body.error?.code)}: enter a valid key above, then reload.</p>`;
+    return;
+  }
+  ADAPTERS = body.adapters;
+  const opts = ADAPTERS.map((a) => `<option value="${esc(a.id)}">${esc(a.id)} (${esc(a.head)})</option>`).join("");
+  $("#d-adapter").innerHTML = opts;
+  $("#c-adapter").innerHTML = opts;
+  renderForm();
+}
+const adapterById = (id) => ADAPTERS.find((a) => a.id === id);
+
+function renderForm() {
+  const a = adapterById($("#d-adapter").value);
+  if (!a) return;
+  $("#d-fields").innerHTML = Object.entries(a.input_schema.properties)
+    .map(([k, sch]) => {
+      const isList = sch.type === "array";
+      return `<label for="f-${esc(k)}">${esc(k)}${isList ? " (one per line)" : ""}</label>
+              <textarea id="f-${esc(k)}" data-key="${esc(k)}" data-list="${isList}"></textarea>`;
+    })
+    .join("");
+}
+$("#d-adapter").addEventListener("change", renderForm);
+
+function collectState() {
+  const state = {};
+  document.querySelectorAll("#d-fields textarea").forEach((el) => {
+    const v = el.value;
+    state[el.dataset.key] =
+      el.dataset.list === "true" ? v.split("\n").map((s) => s.trim()).filter(Boolean) : v.trim();
+  });
+  return state;
+}
+
+// ---- decide ----
+function bar(label, p, tau) {
+  const tauLine = tau != null ? `<b class="tau" style="left:${tau * 100}%"></b>` : "";
+  return `<div class="row"><span>${esc(label)}</span><div class="bar"><i style="width:${(p * 100).toFixed(2)}%"></i>${tauLine}</div><span>${fmtPct(p)}</span></div>`;
+}
+
+function renderDecision(state, { status, body }) {
+  const out = $("#d-out");
+  if (status !== 200) {
+    out.innerHTML = `<p class="err">${esc(body.error?.code)}</p><p class="muted">${esc(body.error?.path)} ${esc(body.error?.detail)}</p>`;
+    return;
+  }
+  const d = body.decision;
+  const dg = body.diagnostics;
+  let html = "";
+  if (d.type === "choice") {
+    html += d.abstain
+      ? `<p class="big abstain">Abstained</p><p class="muted">Top confidence ${fmtPct(Math.max(...d.distribution))} is below tau ${dg.tau}. Route to a human or a slower path.</p>`
+      : `<p class="big">${esc(d.label)}</p><p class="muted">Confidence ${fmtPct(d.confidence)}</p>`;
+    html += d.distribution.map((p, i) => bar(state[adapterById(body.adapter).labels_from][i], p, dg.tau)).join("");
+  } else if (d.type === "boolean") {
+    html += d.abstain
+      ? `<p class="big abstain">Abstained</p><p class="muted">Top confidence is below tau ${dg.tau}.</p>`
+      : `<p class="big">${d.value ? "Yes, complies" : "No, does not comply"}</p><p class="muted">Confidence ${fmtPct(d.confidence)}</p>`;
+    html += bar("false", d.distribution[0], dg.tau) + bar("true", d.distribution[1], dg.tau);
+  } else {
+    html += `<p class="big">${d.value.toFixed(3)}</p><p class="muted">Spread ${d.spread.toFixed(3)} over range [${d.range.join(", ")}]</p>`;
+  }
+  html += `<p class="muted">decision_id <code>${esc(body.decision_id)}</code><br>
+    votes ${dg.votes}/${dg.requested_votes} · provider ${esc(dg.provider)} · cost ${dg.cost_units} units ·
+    ${dg.cache_hit ? "cache hit · " : ""}${dg.calibrated ? "calibrated (T=" + dg.temperature.toFixed(2) + ")" : "uncalibrated"}
+    ${dg.fallbacks_tried.length ? "<br>fallbacks: " + esc(dg.fallbacks_tried.join(", ")) : ""}</p>`;
+  out.innerHTML = html;
+}
+
+$("#d-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const a = adapterById($("#d-adapter").value);
+  const state = collectState();
+  const options = {};
+  if ($("#d-votes").value) options.votes = Number($("#d-votes").value);
+  if ($("#d-tau").value) options.tau = Number($("#d-tau").value);
+  $("#d-out").innerHTML = `<p class="muted">Running…</p>`;
+  const res = await api("/v1/decide", {
+    method: "POST",
+    body: JSON.stringify({ adapter: a.id, task_id: "ui-" + Date.now(), state, options }),
+  });
+  renderDecision(state, res);
+});
+
+// ---- batch ----
+async function runBatch(items) {
+  const rows = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      const { status, body } = await api("/v1/decide", { method: "POST", body: JSON.stringify(items[i]) });
+      const d = body.decision ?? {};
+      rows[i] = {
+        task_id: items[i].task_id ?? i,
+        status,
+        result: d.type === "choice" ? (d.abstain ? "ABSTAIN" : d.label) : d.type === "boolean" ? (d.abstain ? "ABSTAIN" : String(d.value)) : d.value ?? body.error?.code,
+        confidence: d.confidence ?? "",
+        provider: body.diagnostics?.provider ?? "",
+        cost_units: body.diagnostics?.cost_units ?? "",
+        error: body.error?.code ?? "",
+      };
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  return rows;
+}
+
+let lastBatch = [];
+$("#b-run").addEventListener("click", async () => {
+  let items;
+  try {
+    items = $("#b-lines").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  } catch (e) {
+    $("#b-out").innerHTML = `<p class="err">Parse error: ${esc(e.message)}</p>`;
+    return;
+  }
+  $("#b-out").innerHTML = `<p class="muted">Running ${items.length} requests…</p>`;
+  lastBatch = await runBatch(items);
+  const head = ["task_id", "status", "result", "confidence", "provider", "cost_units", "error"];
+  const table = `<table><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr>${lastBatch
+    .slice(0, 50)
+    .map((r) => `<tr>${head.map((h) => `<td>${esc(r[h])}</td>`).join("")}</tr>`)
+    .join("")}</table>`;
+  $("#b-out").innerHTML = `${table}<p><button class="primary" id="b-csv" type="button">Export CSV (${lastBatch.length} rows)</button></p>`;
+  $("#b-csv").onclick = () => {
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [head.join(","), ...lastBatch.map((r) => head.map((h) => q(r[h])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: "jevlet-batch.csv" });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+});
+
+// ---- calibrate ----
+$("#c-run").addEventListener("click", async () => {
+  let labels;
+  try {
+    labels = $("#c-lines").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  } catch (e) {
+    $("#c-out").innerHTML = `<p class="err">Parse error: ${esc(e.message)}</p>`;
+    return;
+  }
+  const { status, body } = await api("/v1/calibrate", {
+    method: "POST",
+    body: JSON.stringify({ adapter: $("#c-adapter").value, labels }),
+  });
+  if (status !== 200) {
+    $("#c-out").innerHTML = `<p class="err">${esc(body.error?.code)}: ${esc(body.error?.detail)}</p>`;
+    return;
+  }
+  $("#c-out").innerHTML = `
+    <table>
+      <tr><th>Labeled decisions (n)</th><td>${body.n}</td></tr>
+      <tr><th>Temperature</th><td>${body.temperature}</td></tr>
+      <tr><th>ECE raw → calibrated</th><td>${body.ece_raw?.toFixed(3) ?? "n/a"} → ${body.ece?.toFixed(3) ?? "n/a"}</td></tr>
+      <tr><th>Calibrated</th><td>${body.calibrated ? "yes" : "no, needs 200 labels"}</td></tr>
+    </table>`;
+});
+
+// ---- usage ----
+async function loadUsage() {
+  const { status, body } = await api("/v1/usage");
+  if (status !== 200) {
+    $("#u-out").innerHTML = `<p class="err">${esc(body.error?.code)}</p>`;
+    return;
+  }
+  const cal = Object.entries(body.calibration)
+    .map(([id, c]) => `<tr><td>${esc(id)}</td><td>${c ? c.n : 0}</td><td>${c ? c.temperature : "n/a"}</td><td>${c?.ece != null ? c.ece.toFixed(3) : "n/a"}</td></tr>`)
+    .join("");
+  $("#u-out").innerHTML = `
+    <p class="big">${body.units_today} / ${body.daily_cap} units</p>
+    <p class="muted">${body.calls_today} requests today (${body.day})</p>
+    <table><tr><th>Adapter</th><th>n</th><th>T</th><th>ECE</th></tr>${cal}</table>`;
+}
+$("#u-refresh").addEventListener("click", loadUsage);
+
+loadAdapters();
+</script>
+</body>
+</html>

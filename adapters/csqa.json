@@ -1,0 +1,22 @@
+{
+  "id": "csqa",
+  "description": "Multiple choice (CommonsenseQA style): pick the single best option from the given list.",
+  "head": "choice",
+  "labels_from": "choices",
+  "input_schema": {
+    "type": "object",
+    "required": ["question", "choices"],
+    "properties": {
+      "question": { "type": "string", "minLength": 1, "maxLength": 1000 },
+      "choices": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 10,
+        "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    }
+  },
+  "question": "Pick the single answer a typical person would consider most sensible for the question.",
+  "tau": 0.6,
+  "votes": 5
+}
